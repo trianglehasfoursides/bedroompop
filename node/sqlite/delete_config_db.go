@@ -1,14 +1,15 @@
 package sqlite
 
-import "github.com/trianglehasfoursides/mathrock/node/meta"
+import (
+	"sync"
 
-func deleteConfigDb(name string) error {
-	txn = meta.Meta.NewTransaction(true)
-	if err = txn.Delete([]byte(name)); err != nil {
-		return err
-	}
-	if err = txn.Commit(); err != nil {
-		return err
-	}
-	return nil
+	"github.com/trianglehasfoursides/mathrock/node/meta"
+)
+
+func deleteConfigDb(name string, mtx *sync.Mutex) {
+	txn := meta.Meta.NewTransaction(true)
+	mtx.Lock()
+	defer mtx.Unlock()
+	txn.Delete([]byte(name))
+	txn.Commit()
 }

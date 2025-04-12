@@ -2,24 +2,23 @@ package sqlite
 
 import (
 	_ "embed"
-	"encoding/json"
+	"sync"
 
-	"github.com/dgraph-io/badger/v4"
+	"github.com/bytedance/sonic"
 	"github.com/trianglehasfoursides/mathrock/node/meta"
 )
 
-// the configuration fileee...
-func createMetaDb(name string) error {
-	metarawr, _ := json.Marshal(metadb)
-	metaentry = badger.NewEntry([]byte("meta:"+name), metarawr)
-	txn = meta.Meta.NewTransaction(true)
-	err = txn.SetEntry(metaentry)
-	if err != nil {
-		return err
-	}
-	err = txn.Commit()
-	if err != nil {
-		return err
-	}
-	return nil
+type metaDb struct {
+	Config *configDb
+}
+
+var metadb metaDb
+
+func createMetaDb(name string, mtx *sync.Mutex) {
+	metaa, _ := sonic.Marshal(metadb)
+	txn := meta.Meta.NewTransaction(true)
+	mtx.Lock()
+	defer mtx.Unlock()
+	txn.Set([]byte(name), metaa)
+	txn.Commit()
 }

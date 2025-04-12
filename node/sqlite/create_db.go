@@ -4,26 +4,21 @@ import (
 	"database/sql"
 	"errors"
 	"os"
+	"sync"
 
 	"github.com/adrg/xdg"
 	_ "github.com/mattn/go-sqlite3"
 )
 
-func CreateDb(name string) error {
-	if err = os.Chdir(xdg.DataHome); err != nil {
-		return err
+func CreateDb(name string, mtx *sync.Mutex) error {
+	if _, err := os.Stat(name); err != nil {
+		db, err := sql.Open("sqlite3", xdg.DataHome+"/"+name+".sqlite")
+		if err != nil {
+			return err
+		}
+		db.Close()
+		createMetaDb(name, mtx)
+		createConfigDb(name, mtx)
 	}
-	if _, err = sql.Open("sqlite3", xdg.DataHome+"/"+name); err != nil {
-		return err
-	}
-	if err = createMetaDb("meta:" + name); err != nil {
-		err = errors.Join(os.Remove(xdg.DataHome+"/"+name), err)
-		return err
-	}
-	if err = createConfigDb("config:" + name); err != nil {
-		err = errors.Join(deleteMetaDb("meta:"+name), err)
-		err = errors.Join(os.Remove(xdg.DataHome+"/"+name), err)
-		return err
-	}
-	return nil
+	return errors.New("the database already exist")
 }

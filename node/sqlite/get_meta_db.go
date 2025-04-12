@@ -1,24 +1,18 @@
 package sqlite
 
 import (
-	"errors"
-
-	"github.com/dgraph-io/badger/v4"
 	"github.com/trianglehasfoursides/mathrock/node/meta"
 )
 
-func GetMetaDb(name string) (m []byte, err error) {
-	txn = meta.Meta.NewTransaction(false)
-	result, err := txn.Get([]byte("meta" + name))
-	if err == badger.ErrKeyNotFound {
-		return nil, errors.New("there is no database with the name: " + name)
-	} else if err != nil {
-		return nil, err
-	}
+var metadata []byte
+
+func getMetaDb(name string) []byte {
+	txn := meta.Meta.NewTransaction(false)
+	result, _ := txn.Get([]byte("meta:" + name))
 	txn.Commit()
 	result.Value(func(val []byte) error {
-		m = val
+		metadata = val
 		return nil
 	})
-	return m, nil
+	return metadata
 }

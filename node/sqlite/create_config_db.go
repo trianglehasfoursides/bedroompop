@@ -2,23 +2,25 @@ package sqlite
 
 import (
 	_ "embed"
-	"encoding/json"
+	"sync"
 
-	"github.com/dgraph-io/badger/v4"
+	"github.com/bytedance/sonic"
 	"github.com/trianglehasfoursides/mathrock/node/meta"
 )
 
-func createConfigDb(name string) error {
-	conf, _ := json.Marshal(config)
-	configentry = badger.NewEntry([]byte("config:"+name), conf)
-	txn = meta.Meta.NewTransaction(true)
-	err = txn.SetEntry(configentry)
-	if err != nil {
-		return err
-	}
-	err = txn.Commit()
-	if err != nil {
-		return err
-	}
-	return nil
+type configDb struct {
+	SizeLimit   int64 `json:"size_limit,omitempty"`
+	BlockReads  bool  `json:"block_reads,omitempty"`
+	BlockWrites bool  `json:"block_writes,omitempty"`
+}
+
+var config *configDb
+
+func createConfigDb(name string, mtx *sync.Mutex) {
+	conf, _ := sonic.Marshal(config)
+	txn := meta.Meta.NewTransaction(true)
+	mtx.Lock()
+	defer mtx.Unlock()
+	txn.Set([]byte(name), conf)
+	txn.Commit()
 }

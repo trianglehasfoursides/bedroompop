@@ -9,7 +9,7 @@ func route() *chi.Mux {
 	router.Get("/", index)
 
 	// create
-	router.Post("/createdb", createDb)
+	router.Post("/databases", createDb)
 
 	return router
 }

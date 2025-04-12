@@ -3,6 +3,7 @@ package server
 import (
 	"io"
 	"net/http"
+	"sync"
 
 	"github.com/tidwall/gjson"
 	"github.com/trianglehasfoursides/mathrock/node/sqlite"
@@ -10,9 +11,10 @@ import (
 )
 
 func createDb(w http.ResponseWriter, r *http.Request) {
+	mtx := &sync.Mutex{}
 	req, err := io.ReadAll(r.Body)
 	if err != nil {
-		w.Write([]byte(err.Error()))
+		w.Write([]byte(""))
 		return
 	}
 	name := gjson.Get(string(req), "name").String()
@@ -20,7 +22,7 @@ func createDb(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(""))
 		return
 	}
-	if err = sqlite.CreateDb(name); err != nil {
+	if err = sqlite.CreateDb(name, mtx); err != nil {
 		w.Write([]byte(err.Error()))
 		zap.L().Error(err.Error())
 		return
