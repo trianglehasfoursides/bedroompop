@@ -1,6 +1,7 @@
-package sqlite
+package database
 
 import (
+	"io/ioutil"
 	"log"
 	"sync"
 
@@ -17,7 +18,8 @@ var (
 // initConfigDB menginisialisasi database konfigurasi menggunakan BadgerDB
 func init() {
 	// Membuka database Badger dengan opsi default
-	ConfigDB, dbErr = badger.Open(badger.DefaultOptions("").WithLogger(nil)) // Nonaktifkan logger untuk performa lebih baik
+	dir, _ := ioutil.TempDir("", "badger-test")
+	ConfigDB, dbErr = badger.Open(badger.DefaultOptions(dir).WithLogger(nil)) // Nonaktifkan logger untuk performa lebih baik
 	if dbErr != nil {
 		// Jika terjadi error, hentikan aplikasi dengan pesan error yang jelas
 		log.Fatal("Gagal membuka database konfigurasi. Pesan error: " + dbErr.Error())
@@ -36,7 +38,7 @@ type DatabaseConfiguration struct {
 var defaultDatabaseConfiguration *DatabaseConfiguration
 
 // SaveDatabaseConfiguration saves or updates the configuration for a specific database
-func SaveDatabaseConfiguration(databaseName string, mutex *sync.Mutex) error {
+func SaveDatabaseConfiguration(databaseName string, category string, mutex *sync.Mutex) error {
 	// Serialize the configuration into JSON format
 	configJSON, err := sonic.Marshal(defaultDatabaseConfiguration)
 	if err != nil {
@@ -52,7 +54,7 @@ func SaveDatabaseConfiguration(databaseName string, mutex *sync.Mutex) error {
 	defer mutex.Unlock()
 
 	// Save the configuration in the metadata store with the database name as the key
-	transaction.Set([]byte("config:"+databaseName), configJSON)
+	transaction.Set([]byte(category+databaseName), configJSON)
 
 	// Commit the transaction to persist the changes
 	if err := transaction.Commit(); err != nil {
@@ -64,7 +66,7 @@ func SaveDatabaseConfiguration(databaseName string, mutex *sync.Mutex) error {
 }
 
 // UpdateDatabaseConfiguration updates the configuration for a specific database
-func UpdateDatabaseConfiguration(databaseName string, newConfig *DatabaseConfiguration, mutex *sync.Mutex) error {
+func UpdateDatabaseConfiguration(databaseName string, category string, newConfig *DatabaseConfiguration, mutex *sync.Mutex) error {
 	// Serialize the new configuration into JSON format
 	configJSON, err := sonic.Marshal(newConfig)
 	if err != nil {
@@ -80,7 +82,7 @@ func UpdateDatabaseConfiguration(databaseName string, newConfig *DatabaseConfigu
 	defer mutex.Unlock()
 
 	// Update the configuration in the metadata store with the database name as the key
-	transaction.Set([]byte("config:"+databaseName), configJSON)
+	transaction.Set([]byte(category+databaseName), configJSON)
 
 	// Commit the transaction to persist the changes
 	if err := transaction.Commit(); err != nil {
@@ -92,7 +94,7 @@ func UpdateDatabaseConfiguration(databaseName string, newConfig *DatabaseConfigu
 }
 
 // DeleteDatabaseConfiguration removes the configuration for a specific database
-func DeleteDatabaseConfiguration(databaseName string, mutex *sync.Mutex) error {
+func DeleteDatabaseConfiguration(databaseName string, category string, mutex *sync.Mutex) error {
 	// Start a new transaction for the metadata store
 	transaction := ConfigDB.NewTransaction(true)
 
@@ -101,7 +103,7 @@ func DeleteDatabaseConfiguration(databaseName string, mutex *sync.Mutex) error {
 	defer mutex.Unlock()
 
 	// Delete the configuration associated with the database name
-	transaction.Delete([]byte("config:" + databaseName))
+	transaction.Delete([]byte(category + databaseName))
 
 	// Commit the transaction to persist the changes
 	if err := transaction.Commit(); err != nil {
@@ -113,12 +115,12 @@ func DeleteDatabaseConfiguration(databaseName string, mutex *sync.Mutex) error {
 }
 
 // GetDatabaseConfiguration retrieves the configuration for a specific database
-func GetDatabaseConfiguration(databaseName string) ([]byte, error) {
+func GetDatabaseConfiguration(databaseName string, category string) ([]byte, error) {
 	// Start a new transaction for the metadata store
 	transaction := ConfigDB.NewTransaction(false)
 
 	// Retrieve the configuration associated with the database name
-	item, err := transaction.Get([]byte("config:" + databaseName))
+	item, err := transaction.Get([]byte(category + databaseName))
 	if err != nil {
 		// Return an error if retrieval fails
 		return nil, err

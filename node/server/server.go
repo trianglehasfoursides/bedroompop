@@ -1,28 +1,31 @@
 package server
 
 import (
-	"crypto/tls"
+	//"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/trianglehasfoursides/mathrock/node/sqlite"
+	"github.com/quic-go/quic-go/http3"
+	"github.com/trianglehasfoursides/mathrock/node/database"
+	"github.com/trianglehasfoursides/mathrock/node/database/sqlite"
 	"go.uber.org/zap"
 )
 
 // StartHTTP2Server starts an HTTP/2 server with Chi and TLS
 func StartHTTP2Server(address, certFile, keyFile string) error {
 	// Load the TLS certificate and key
-	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
-	if err != nil {
-		return fmt.Errorf("failed to load TLS certificate and key: %v", err)
-	}
+	/*
+		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+		if err != nil {
+			return fmt.Errorf("failed to load TLS certificate and key: %v", err)
+		}
 
-	// Configure the TLS settings
-	tlsConfig := &tls.Config{Certificates: []tls.Certificate{cert}}
-
+		// Configure the TLS settings
+		tlsConfig := &tls.Config{Certificates: []tls.Certificate{cert}}
+	*/
 	// Create a Chi router
 	router := chi.NewRouter()
 
@@ -34,14 +37,14 @@ func StartHTTP2Server(address, certFile, keyFile string) error {
 	router.Put("/databases/{name}/config", updateDatabaseConfigHandler) // Update database configuration
 
 	// Create an HTTP server with TLS
-	server := &http.Server{
-		Addr:      address,
-		Handler:   router,
-		TLSConfig: tlsConfig,
+	server := &http3.Server{
+		Addr:    address,
+		Handler: router,
+		//TLSConfig: tlsConfig,
 	}
 
 	zap.L().Info("HTTP/2 server started", zap.String("address", address))
-	return server.ListenAndServeTLS("", "")
+	return server.ListenAndServe()
 }
 
 // createDatabaseHandler handles the creation of a new database
@@ -140,7 +143,7 @@ func updateDatabaseConfigHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse the JSON request body for the new configuration
-	var newConfig sqlite.DatabaseConfiguration
+	var newConfig database.DatabaseConfiguration
 	if err := json.NewDecoder(r.Body).Decode(&newConfig); err != nil {
 		zap.L().Error("Invalid JSON format", zap.Error(err))
 		http.Error(w, `{"error": "Invalid JSON format"}`, http.StatusBadRequest)
@@ -156,7 +159,7 @@ func updateDatabaseConfigHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Update the database configuration
 	mutex := &sync.Mutex{}
-	if err := sqlite.UpdateDatabaseConfiguration(databaseName, &newConfig, mutex); err != nil {
+	if err := database.UpdateDatabaseConfiguration(databaseName, &newConfig, mutex); err != nil {
 		zap.L().Error("Error updating database configuration", zap.String("database", databaseName), zap.Error(err))
 		http.Error(w, fmt.Sprintf(`{"error": "Error updating database configuration: %v"}`, err), http.StatusInternalServerError)
 		return
@@ -181,7 +184,7 @@ func listDatabasesHandler(w http.ResponseWriter, r *http.Request) {
 	// Respond with the list of databases
 	zap.L().Info("Databases listed successfully", zap.Int("count", len(databases)))
 	w.WriteHeader(http.StatusOK)
-	response := map[string]interface{}{
+	response := map[string]any{
 		"success":   true,
 		"databases": databases,
 	}
