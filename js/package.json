@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "libsql": "^0.5.5"
+  }
+}

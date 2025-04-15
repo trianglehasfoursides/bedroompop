@@ -13,89 +13,89 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/pkg/errors"
 	"go.etcd.io/bbolt"
+	"go.uber.org/zap"
 )
 
-// CreateDatabase creates a new SQLite database along with its configuration
-func CreateDatabase(databaseName string, category string, mutex *sync.Mutex) error {
+// CreateDatabase creates a new database (SQLite, BoltDB, or DuckDB) along with its configuration.
+func CreateDatabase(databaseName, category string, mutex *sync.Mutex) error {
+	// Construct the full path for the database file
+	databasePath := filepath.Join(xdg.DataHome, databaseName+"."+category)
+
+	// Check if the database file already exists
+	if _, err := os.Stat(databasePath); err == nil {
+		return errors.New("the database already exists")
+	}
+
 	switch category {
 	case "sqlite":
-		// Construct the full path for the database file
-		databasePath := filepath.Join(xdg.DataHome, databaseName+"."+category)
-
-		// Check if the database file already exists
-		if _, err := os.Stat(databasePath); err == nil {
-			// Return an error if the database already exists
-			return errors.New("the database already exists")
-		}
-
-		// Attempt to create the database file
+		// Create SQLite database
 		db, err := sql.Open("sqlite3", databasePath)
 		if err != nil {
-			// Return an error if the database creation fails
-			return err
-		}
-
-		// Save configuration for the database
-		if err := SaveDatabaseConfiguration(databaseName, category, mutex); err != nil {
-			return err // Return an error if saving configuration fails
-		}
-
-		db.Close() // Close teh database
-
-		return nil // Return nil if the database is created successfully
-	case "bolt":
-		db, err := bbolt.Open(xdg.DataHome+databaseName+"."+category, 0600, nil)
-		if err != nil {
-			return err
+			return errors.Wrap(err, "failed to create SQLite database")
 		}
 		defer db.Close()
-		SaveDatabaseConfiguration(databaseName, category, mutex)
-		return nil
+
+	case "bolt":
+		// Create BoltDB database
+		db, err := bbolt.Open(databasePath, 0600, nil)
+		if err != nil {
+			return errors.Wrap(err, "failed to create BoltDB database")
+		}
+		defer db.Close()
+
 	case "duckdb":
+		// Create DuckDB database
 		db, err := sql.Open("duckdb", "")
 		if err != nil {
-			return err
+			return errors.Wrap(err, "failed to create DuckDB database")
 		}
 		defer db.Close()
-	case "pglite":
-	case "sqlitex":
-	case "postrock":
+
+	default:
+		return errors.New("unsupported database category")
 	}
-	return errors.New("no database was selected")
+
+	// Save configuration for the database
+	if err := SaveDatabaseConfiguration(databaseName, category, mutex); err != nil {
+		_ = os.Remove(databasePath) // Clean up the database file if saving configuration fails
+		return errors.Wrap(err, "failed to save database configuration")
+	}
+
+	return nil // Database created successfully
 }
 
-// RemoveDatabase deletes the SQLite database file along with its configuration
-func DeleteDatabase(databaseName string, category string, mutex *sync.Mutex) error {
+// DeleteDatabase deletes a database file (SQLite, BoltDB, or DuckDB) along with its configuration.
+func DeleteDatabase(databaseName, category string, mutex *sync.Mutex) error {
 	// Construct the full path for the database file
 	databasePath := filepath.Join(xdg.DataHome, databaseName+"."+category)
 
 	// Attempt to remove the database file
 	if err := os.Remove(databasePath); err != nil {
-		return errors.New("no database found with the name: " + databaseName)
+		return errors.Wrap(err, "failed to delete database file")
 	}
 
 	// Remove associated configuration
 	if err := DeleteDatabaseConfiguration(databaseName, category, mutex); err != nil {
-		return errors.New("error occurs while deleting database configuration : " + err.Error()) // Return an error if deleting configuration fails
+		return errors.Wrap(err, "failed to delete database configuration")
 	}
 
-	return nil // Return nil if the database is removed successfully
+	return nil // Database deleted successfully
 }
 
-// RetrieveDatabase retrieves the configuration for a specific database
-func GetDatabase(databaseName string, category string) ([]byte, error) {
+// GetDatabase retrieves the configuration for a specific database.
+func GetDatabase(databaseName, category string) ([]byte, error) {
 	// Construct the full path for the database file
 	databasePath := filepath.Join(xdg.DataHome, databaseName+"."+category)
 
 	// Check if the database file exists
 	if _, err := os.Stat(databasePath); err != nil {
-		return nil, errors.New("") // Return an error if the database file does not exist
+		return nil, errors.New("database file does not exist")
 	}
 
 	// Retrieve the configuration
 	configuration, err := GetDatabaseConfiguration(databaseName, category)
 	if err != nil {
-		return nil, err // Return an error if retrieving configuration fails
+		return nil, errors.Wrap(err, "failed to retrieve database configuration")
 	}
 
 	return configuration, nil // Return the configuration as a byte slice
@@ -112,14 +112,15 @@ func ListDatabases(category string) ([]map[string]any, error) {
 	// Filter entries to include only SQLite database files
 	var databases []map[string]any
 	for _, entry := range entries {
-		if category != "" && strings.HasSuffix(entry.Name(), category) {
-			// Extract the database name (without the .sqlite extension)
+		if category != "all" && strings.HasSuffix(entry.Name(), category) {
+			// Extract the database name (without the extension)
 			databaseName := strings.Split(entry.Name(), ".")
 
 			// Retrieve the configuration for the database
 			configData, err := GetDatabaseConfiguration(databaseName[0], category)
 			if err != nil {
 				// If configuration retrieval fails, log the error and skip this database
+				zap.L().Error("Failed to retrieve database configuration", zap.String("database", databaseName[0]), zap.Error(err))
 				continue
 			}
 
@@ -127,6 +128,7 @@ func ListDatabases(category string) ([]map[string]any, error) {
 			var config DatabaseConfiguration
 			if err := sonic.Unmarshal(configData, &config); err != nil {
 				// If parsing fails, log the error and skip this database
+				zap.L().Error("Failed to parse database configuration", zap.String("database", databaseName[0]), zap.Error(err))
 				continue
 			}
 
@@ -136,13 +138,14 @@ func ListDatabases(category string) ([]map[string]any, error) {
 				"configuration": config,
 			})
 		} else {
-			// Extract the database name (without the .sqlite extension)
+			// Extract the database name
 			databaseName := strings.TrimSuffix(entry.Name(), "."+category)
 
 			// Retrieve the configuration for the database
 			configData, err := GetDatabaseConfiguration(databaseName, category)
 			if err != nil {
 				// If configuration retrieval fails, log the error and skip this database
+				zap.L().Error("Failed to retrieve database configuration", zap.String("database", databaseName), zap.Error(err))
 				continue
 			}
 
@@ -150,6 +153,7 @@ func ListDatabases(category string) ([]map[string]any, error) {
 			var config DatabaseConfiguration
 			if err := sonic.Unmarshal(configData, &config); err != nil {
 				// If parsing fails, log the error and skip this database
+				zap.L().Error("Failed to parse database configuration", zap.String("database", databaseName), zap.Error(err))
 				continue
 			}
 
