@@ -54,7 +54,7 @@ func SaveDatabaseConfiguration(databaseName string, category string, mutex *sync
 	defer mutex.Unlock()
 
 	// Save the configuration in the metadata store with the database name as the key
-	transaction.Set([]byte(category+databaseName), configJSON)
+	transaction.Set([]byte(category+":"+databaseName), configJSON)
 
 	// Commit the transaction to persist the changes
 	if err := transaction.Commit(); err != nil {
@@ -82,7 +82,7 @@ func UpdateDatabaseConfiguration(databaseName string, category string, newConfig
 	defer mutex.Unlock()
 
 	// Update the configuration in the metadata store with the database name as the key
-	transaction.Set([]byte(category+databaseName), configJSON)
+	transaction.Set([]byte(category+":"+databaseName), configJSON)
 
 	// Commit the transaction to persist the changes
 	if err := transaction.Commit(); err != nil {
@@ -103,7 +103,7 @@ func DeleteDatabaseConfiguration(databaseName string, category string, mutex *sy
 	defer mutex.Unlock()
 
 	// Delete the configuration associated with the database name
-	transaction.Delete([]byte(category + databaseName))
+	transaction.Delete([]byte(category + ":" + databaseName))
 
 	// Commit the transaction to persist the changes
 	if err := transaction.Commit(); err != nil {
@@ -120,7 +120,7 @@ func GetDatabaseConfiguration(databaseName string, category string) ([]byte, err
 	transaction := ConfigDB.NewTransaction(false)
 
 	// Retrieve the configuration associated with the database name
-	item, err := transaction.Get([]byte(category + databaseName))
+	item, err := transaction.Get([]byte(category + ":" + databaseName))
 	if err != nil {
 		// Return an error if retrieval fails
 		return nil, err
