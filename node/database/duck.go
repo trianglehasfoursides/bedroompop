@@ -8,15 +8,15 @@ import (
 	"path"
 
 	"github.com/adrg/xdg"
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/marcboeker/go-duckdb/v2"
 	"go.uber.org/zap"
 )
 
 // Query executes a SQL query on the specified SQLite database.
 // It supports both SELECT queries (returns rows as JSON) and non-SELECT queries (logs affected rows).
-func SqliteQuery(databaseName string, query string, ctx context.Context) ([]byte, error) {
+func DuckQuery(databaseName string, query string, ctx context.Context) ([]byte, error) {
 	// Open the SQLite database file
-	db, err := sql.Open("sqlite3", path.Join(xdg.DataHome, databaseName+".sqlite"))
+	db, err := sql.Open("duckdb", path.Join(xdg.DataHome, databaseName+".duck"))
 	if err != nil {
 		zap.L().Error("Failed to open database", zap.String("database", databaseName), zap.Error(err))
 		return []byte(""), fmt.Errorf("failed to open database: %w", err)
