@@ -1,7 +1,13 @@
 package main
 
-import "github.com/trianglehasfoursides/mathrock/cmd"
+import (
+	"fmt"
+
+	"github.com/tidwall/gjson"
+	"github.com/trianglehasfoursides/mathrock/node/server"
+)
 
 func main() {
-	cmd.Execute()
+	msg := server.ParseMessage([]byte(`{"key":"ping","value":"hello"}`))
+	fmt.Println(gjson.Get(string(msg.Value), "value").String())
 }

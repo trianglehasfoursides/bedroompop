@@ -1,7 +1,8 @@
 {
-    "key": "",
     "value": {
         "name": "",
-        "address": ""
+        "address": "",
+        "config": {
+        }
     }
 }

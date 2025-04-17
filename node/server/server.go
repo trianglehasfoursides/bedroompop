@@ -1,8 +1,13 @@
 package server
 
 import (
+	"context"
 	"fmt"
+	"log"
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 
 	"github.com/bytedance/sonic"
 	"github.com/hashicorp/memberlist"
@@ -41,6 +46,68 @@ func (d *GossipDelegate) NotifyMsg(msg []byte) {
 		var mutex = new(sync.Mutex)
 		var name, category string = gjson.Get(string(message.Value), "name").String(), gjson.Get(string(message.Value), "category").String()
 		if err := database.CreateDatabase(name, category, mutex); err != nil {
+			var err = fmt.Sprintf("{\"error\": \"%s\"}", err.Error())
+			// Send error message back to the gate
+			node.Gosip.SendToAddress(node.Gate, []byte(err))
+			// Log the error
+			zap.L().Error("Failed to create database", zap.String("name", name), zap.String("category", category), zap.String("error", err))
+			return
+		}
+		return
+	case "delete_db":
+		var mutex = new(sync.Mutex)
+		var name, category string = gjson.Get(string(message.Value), "name").String(), gjson.Get(string(message.Value), "category").String()
+		if err := database.DeleteDatabase(name, category, mutex); err != nil {
+			var err = fmt.Sprintf("{\"error\": \"%s\"}", err.Error())
+			// Send error message back to the gate
+			node.Gosip.SendToAddress(node.Gate, []byte(err))
+			// Log the error
+			zap.L().Error("Failed to create database", zap.String("name", name), zap.String("category", category), zap.String("error", err))
+			return
+		}
+		return
+	case "get_db":
+		var name, category string = gjson.Get(string(message.Value), "name").String(), gjson.Get(string(message.Value), "category").String()
+		var db, err = database.GetDatabase(name, category)
+		if err != nil {
+			var err = fmt.Sprintf("{\"error\": \"%s\"}", err.Error())
+			// Send error message back to the gate
+			node.Gosip.SendToAddress(node.Gate, []byte(err))
+			// Log the error
+			zap.L().Error("Failed to create database", zap.String("name", name), zap.String("category", category), zap.String("error", err))
+			return
+		}
+		node.Gosip.SendToAddress(node.Gate, []byte(db))
+		return
+	case "list_db":
+		var category string = gjson.Get(string(message.Value), "category").String()
+		var db, err = database.ListDatabases(category)
+		if err != nil {
+			var err = fmt.Sprintf("{\"error\": \"%s\"}", err.Error())
+			// Send error message back to the gate
+			node.Gosip.SendToAddress(node.Gate, []byte(err))
+			// Log the error
+			zap.L().Error("Failed to create database", zap.String("category", category), zap.String("error", err))
+			return
+		}
+		listDb, err := sonic.Marshal(db)
+		if err != nil {
+			var err = fmt.Sprintf("{\"error\": \"%s\"}", err.Error())
+			// Send error message back to the gate
+			node.Gosip.SendToAddress(node.Gate, []byte(err))
+			// Log the error
+			zap.L().Error("Failed to create database", zap.String("category", category), zap.String("error", err))
+			return
+		}
+		node.Gosip.SendToAddress(node.Gate, listDb)
+		return
+	case "update_config":
+		var mutex = new(sync.Mutex)
+		var newConfig = new(database.DatabaseConfiguration)
+		var name, category string = gjson.Get(string(message.Value), "name").String(), gjson.Get(string(message.Value), "category").String()
+		var config = gjson.Get(string(message.Value), "config").Value()
+		sonic.Unmarshal(config.([]byte), newConfig)
+		if err := database.UpdateDatabaseConfiguration(name, category, newConfig, mutex); err != nil {
 			var err = fmt.Sprintf("{\"error\": \"%s\"}", err.Error())
 			// Send error message back to the gate
 			node.Gosip.SendToAddress(node.Gate, []byte(err))
@@ -92,29 +159,81 @@ func ParseMessage(data []byte) *Message {
 
 // Start initializes the memberlist and starts the gossip protocol.
 // It creates a channel for incoming messages and sets up the event delegate.
-// The memberlist is configured with the provided address and name.
+// The memberlist is configured with the provided address, name, and port.
 func Start(addr string, name string, port int) {
 	// Create a channel for incoming messages
 	messageChannel := make(chan []byte)
 
-	// Initialize delegate for message handling
+	// Initialize the GossipDelegate for message handling
 	gossipDelegate = &GossipDelegate{
 		MessageChannel: messageChannel,
-		Queue:          &memberlist.TransmitLimitedQueue{},
+		Queue: &memberlist.TransmitLimitedQueue{
+			NumNodes: func() int {
+				if node.Gosip != nil {
+					return node.Gosip.NumMembers()
+				}
+				return 0
+			},
+			RetransmitMult: 3, // Number of times to retransmit messages
+		},
 	}
+
 	// Configure the memberlist node
 	config := memberlist.DefaultLocalConfig()
-	config.Name = name // Avoid name conflicts
+	config.Name = name // Set the node name to avoid conflicts
 	config.BindAddr = addr
 	config.BindPort = port
 	config.AdvertiseAddr = addr
 	config.Delegate = gossipDelegate
 
-	// Create the memberlist
+	// Create the memberlist instance
+	var err error
+	node = &Node{}
 	node.Gosip, err = memberlist.Create(config)
 	if err != nil {
 		zap.L().Fatal("Failed to create memberlist", zap.Error(err))
 	}
+
+	// Log successful initialization
+	zap.L().Info("Memberlist initialized", zap.String("name", name), zap.String("address", addr), zap.Int("port", port))
+
+	// Context for stopping the gossip protocol
+	stopCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Goroutine to handle termination signals
+	go func(cancel context.CancelFunc) {
+		signal_chan := make(chan os.Signal, 1)
+		signal.Notify(signal_chan, syscall.SIGINT)
+		for {
+			select {
+			case s := <-signal_chan:
+				log.Printf("signal %s happen", s.String())
+				cancel()
+			}
+		}
+	}(cancel)
+
+	// Start processing incoming messages
+	run := true
+	for run {
+		select {
+		case <-stopCtx.Done():
+			// Stop the gossip protocol
+			zap.L().Info("Stopping gossip protocol")
+			run = false
+		}
+	}
+
+	// Cleanup and shutdown
+	zap.L().Info("Gossip protocol stopped")
 }
 
-func Join(addr string) {}
+func Join(addr string) {
+	// Join the cluster using the provided address
+	_, err = node.Gosip.Join([]string{addr})
+	if err != nil {
+		zap.L().Fatal("Failed to join cluster", zap.Error(err))
+	}
+	zap.L().Info("Cluster joined successfully", zap.String("address", addr))
+}
