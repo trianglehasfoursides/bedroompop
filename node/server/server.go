@@ -45,7 +45,7 @@ func (d *GossipDelegate) NotifyMsg(msg []byte) {
 	case "create_db":
 		var mutex = new(sync.Mutex)
 		var name, category string = gjson.Get(string(message.Value), "name").String(), gjson.Get(string(message.Value), "category").String()
-		if err := database.CreateDatabase(name, category, mutex); err != nil {
+		if err := database.CreateDatabase(name, mutex); err != nil {
 			var err = fmt.Sprintf("{\"error\": \"%s\"}", err.Error())
 			// Send error message back to the gate
 			node.Gosip.SendToAddress(node.Gate, []byte(err))
@@ -57,7 +57,7 @@ func (d *GossipDelegate) NotifyMsg(msg []byte) {
 	case "delete_db":
 		var mutex = new(sync.Mutex)
 		var name, category string = gjson.Get(string(message.Value), "name").String(), gjson.Get(string(message.Value), "category").String()
-		if err := database.DeleteDatabase(name, category, mutex); err != nil {
+		if err := database.DeleteDatabase(name, mutex); err != nil {
 			var err = fmt.Sprintf("{\"error\": \"%s\"}", err.Error())
 			// Send error message back to the gate
 			node.Gosip.SendToAddress(node.Gate, []byte(err))
@@ -68,7 +68,7 @@ func (d *GossipDelegate) NotifyMsg(msg []byte) {
 		return
 	case "get_db":
 		var name, category string = gjson.Get(string(message.Value), "name").String(), gjson.Get(string(message.Value), "category").String()
-		var db, err = database.GetDatabase(name, category)
+		var db, err = database.GetDatabase(name)
 		if err != nil {
 			var err = fmt.Sprintf("{\"error\": \"%s\"}", err.Error())
 			// Send error message back to the gate
@@ -81,7 +81,7 @@ func (d *GossipDelegate) NotifyMsg(msg []byte) {
 		return
 	case "list_db":
 		var category string = gjson.Get(string(message.Value), "category").String()
-		var db, err = database.ListDatabases(category)
+		var db, err = database.ListDatabase()
 		if err != nil {
 			var err = fmt.Sprintf("{\"error\": \"%s\"}", err.Error())
 			// Send error message back to the gate
@@ -107,12 +107,39 @@ func (d *GossipDelegate) NotifyMsg(msg []byte) {
 		var name, category string = gjson.Get(string(message.Value), "name").String(), gjson.Get(string(message.Value), "category").String()
 		var config = gjson.Get(string(message.Value), "config").Value()
 		sonic.Unmarshal(config.([]byte), newConfig)
-		if err := database.UpdateDatabaseConfiguration(name, category, newConfig, mutex); err != nil {
+		if err := database.UpdateDatabaseConfiguration(name, newConfig, mutex); err != nil {
 			var err = fmt.Sprintf("{\"error\": \"%s\"}", err.Error())
 			// Send error message back to the gate
 			node.Gosip.SendToAddress(node.Gate, []byte(err))
 			// Log the error
 			zap.L().Error("Failed to create database", zap.String("name", name), zap.String("category", category), zap.String("error", err))
+			return
+		}
+		return
+	case "query":
+		var ctx = context.Background()
+		var name, query string = gjson.Get(string(message.Value), "name").String(), gjson.Get(string(message.Value), "category").String()
+		data, err := database.Query(name, query, ctx)
+		if err != nil {
+			var err = fmt.Sprintf("{\"error\": \"%s\"}", err.Error())
+			// Send error message back to the gate
+			node.Gosip.SendToAddress(node.Gate, []byte(err))
+			// Log the error
+			zap.L().Error("Failed to create database", zap.String("name", name), zap.String("error", err))
+			return
+		}
+		node.Gosip.SendToAddress(node.Gate, data)
+		return
+	case "exec":
+		var ctx = context.Background()
+		var name, query string = gjson.Get(string(message.Value), "name").String(), gjson.Get(string(message.Value), "category").String()
+		_, err = database.Exec(name, query, ctx)
+		if err != nil {
+			var err = fmt.Sprintf("{\"error\": \"%s\"}", err.Error())
+			// Send error message back to the gate
+			node.Gosip.SendToAddress(node.Gate, []byte(err))
+			// Log the error
+			zap.L().Error("Failed to create database", zap.String("name", name), zap.String("error", err))
 			return
 		}
 		return
@@ -146,7 +173,7 @@ func (d *GossipDelegate) MergeRemoteState(buf []byte, join bool) {
 // Message represents a message to be broadcasted in the cluster.
 type Message struct {
 	Key   string `json:"key"`
-	Value []byte `json:"value"`
+	Value string `json:"value"`
 }
 
 // ParseMessage deserializes a JSON byte slice into a Message.
