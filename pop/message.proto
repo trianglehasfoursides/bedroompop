@@ -1,0 +1,38 @@
+syntax = "proto3";
+package message;
+
+option go_package = "bedroompop/pop";
+
+message RequestCreate {
+    string name = 1;
+    string migration = 2;
+}
+
+message RequestGetDrop {
+    string name = 1;
+}
+
+message RequestQueryExec {
+    string name = 1;
+    string query = 2;
+}
+
+message DDLResponse {
+    string msg = 1;
+}
+
+message ResponseQuery {
+    string result = 1;
+}
+
+message ResponseExec {
+    int64 result = 1;
+}
+
+service PopService {
+    rpc Create(RequestCreate) returns (DDLResponse) {}
+    rpc Get(RequestGetDrop) returns (DDLResponse) {}
+    rpc Drop(RequestGetDrop) returns (DDLResponse) {}
+    rpc Query(RequestQueryExec) returns (ResponseQuery) {}
+    rpc Exec(RequestQueryExec) returns (ResponseExec) {}
+}
