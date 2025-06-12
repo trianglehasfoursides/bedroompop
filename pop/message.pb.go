@@ -9,6 +9,7 @@ package pop
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	anypb "google.golang.org/protobuf/types/known/anypb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -121,6 +122,7 @@ type RequestQueryExec struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	Query         string                 `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
+	Args          []*anypb.Any           `protobuf:"bytes,3,rep,name=args,proto3" json:"args,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -169,6 +171,13 @@ func (x *RequestQueryExec) GetQuery() string {
 	return ""
 }
 
+func (x *RequestQueryExec) GetArgs() []*anypb.Any {
+	if x != nil {
+		return x.Args
+	}
+	return nil
+}
+
 type DDLResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Msg           string                 `protobuf:"bytes,1,opt,name=msg,proto3" json:"msg,omitempty"`
@@ -215,7 +224,7 @@ func (x *DDLResponse) GetMsg() string {
 
 type ResponseQuery struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Result        string                 `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	Result        []byte                 `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -250,11 +259,11 @@ func (*ResponseQuery) Descriptor() ([]byte, []int) {
 	return file_message_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *ResponseQuery) GetResult() string {
+func (x *ResponseQuery) GetResult() []byte {
 	if x != nil {
 		return x.Result
 	}
-	return ""
+	return nil
 }
 
 type ResponseExec struct {
@@ -305,19 +314,20 @@ var File_message_proto protoreflect.FileDescriptor
 
 const file_message_proto_rawDesc = "" +
 	"\n" +
-	"\rmessage.proto\x12\amessage\"A\n" +
+	"\rmessage.proto\x12\amessage\x1a\x19google/protobuf/any.proto\"A\n" +
 	"\rRequestCreate\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
 	"\tmigration\x18\x02 \x01(\tR\tmigration\"$\n" +
 	"\x0eRequestGetDrop\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"<\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"f\n" +
 	"\x10RequestQueryExec\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
-	"\x05query\x18\x02 \x01(\tR\x05query\"\x1f\n" +
+	"\x05query\x18\x02 \x01(\tR\x05query\x12(\n" +
+	"\x04args\x18\x03 \x03(\v2\x14.google.protobuf.AnyR\x04args\"\x1f\n" +
 	"\vDDLResponse\x12\x10\n" +
 	"\x03msg\x18\x01 \x01(\tR\x03msg\"'\n" +
 	"\rResponseQuery\x12\x16\n" +
-	"\x06result\x18\x01 \x01(\tR\x06result\"&\n" +
+	"\x06result\x18\x01 \x01(\fR\x06result\"&\n" +
 	"\fResponseExec\x12\x16\n" +
 	"\x06result\x18\x01 \x01(\x03R\x06result2\xb1\x02\n" +
 	"\n" +
@@ -348,23 +358,25 @@ var file_message_proto_goTypes = []any{
 	(*DDLResponse)(nil),      // 3: message.DDLResponse
 	(*ResponseQuery)(nil),    // 4: message.ResponseQuery
 	(*ResponseExec)(nil),     // 5: message.ResponseExec
+	(*anypb.Any)(nil),        // 6: google.protobuf.Any
 }
 var file_message_proto_depIdxs = []int32{
-	0, // 0: message.PopService.Create:input_type -> message.RequestCreate
-	1, // 1: message.PopService.Get:input_type -> message.RequestGetDrop
-	1, // 2: message.PopService.Drop:input_type -> message.RequestGetDrop
-	2, // 3: message.PopService.Query:input_type -> message.RequestQueryExec
-	2, // 4: message.PopService.Exec:input_type -> message.RequestQueryExec
-	3, // 5: message.PopService.Create:output_type -> message.DDLResponse
-	3, // 6: message.PopService.Get:output_type -> message.DDLResponse
-	3, // 7: message.PopService.Drop:output_type -> message.DDLResponse
-	4, // 8: message.PopService.Query:output_type -> message.ResponseQuery
-	5, // 9: message.PopService.Exec:output_type -> message.ResponseExec
-	5, // [5:10] is the sub-list for method output_type
-	0, // [0:5] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	6, // 0: message.RequestQueryExec.args:type_name -> google.protobuf.Any
+	0, // 1: message.PopService.Create:input_type -> message.RequestCreate
+	1, // 2: message.PopService.Get:input_type -> message.RequestGetDrop
+	1, // 3: message.PopService.Drop:input_type -> message.RequestGetDrop
+	2, // 4: message.PopService.Query:input_type -> message.RequestQueryExec
+	2, // 5: message.PopService.Exec:input_type -> message.RequestQueryExec
+	3, // 6: message.PopService.Create:output_type -> message.DDLResponse
+	3, // 7: message.PopService.Get:output_type -> message.DDLResponse
+	3, // 8: message.PopService.Drop:output_type -> message.DDLResponse
+	4, // 9: message.PopService.Query:output_type -> message.ResponseQuery
+	5, // 10: message.PopService.Exec:output_type -> message.ResponseExec
+	6, // [6:11] is the sub-list for method output_type
+	1, // [1:6] is the sub-list for method input_type
+	1, // [1:1] is the sub-list for extension type_name
+	1, // [1:1] is the sub-list for extension extendee
+	0, // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_message_proto_init() }

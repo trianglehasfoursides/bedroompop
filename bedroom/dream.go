@@ -1,12 +1,12 @@
-package dream
+package bedroom
 
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -20,6 +20,8 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 var dbMutex sync.Mutex
@@ -100,28 +102,27 @@ func Drop(w http.ResponseWriter, r *http.Request) {
 
 func Query(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
-	name, query := gjson.Get(string(body), "name").String(), gjson.Get(string(body), "query").String()
+	name, query, args := gjson.Get(string(body), "name").String(), gjson.Get(string(body), "query").String(), gjson.Get(string(body), "args").Array()
 	if name == "" && query == "" {
 		http.Error(w, "database name is required", 400)
 		return
 	}
-	command(w, "query", name, "", query)
+	command(w, "query", name, "", query, args...)
 	return
 }
 
 func Exec(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
-	name, query := gjson.Get(string(body), "name").String(), gjson.Get(string(body), "query").String()
-	fmt.Println(query)
+	name, query, args := gjson.Get(string(body), "name").String(), gjson.Get(string(body), "query").String(), gjson.Get(string(body), "args").Array()
 	if name == "" && query == "" {
 		http.Error(w, "database name is required", 400)
 		return
 	}
-	command(w, "exec", name, "", query)
+	command(w, "exec", name, "", query, args...)
 	return
 }
 
-func command(w http.ResponseWriter, command string, dbname string, migration string, query string) {
+func command(w http.ResponseWriter, command string, dbname string, migration string, query string, args ...gjson.Result) {
 	node := consist.Consist.LocateKey([]byte(dbname))
 	if node.String() == flags.GRPCAddr {
 		switch command {
@@ -135,6 +136,28 @@ func command(w http.ResponseWriter, command string, dbname string, migration str
 			response(w, "sucess", database.Drop(dbname))
 			return
 		case "query":
+			if len(args) > 0 {
+				argsAny := make([]any, len(args))
+				for i, arg := range args {
+					switch arg.Type {
+					case gjson.String:
+						argsAny[i] = arg.String()
+					case gjson.Number:
+						argsAny[i] = arg.Num
+					case gjson.False, gjson.True:
+						argsAny[i] = arg.Bool()
+					case gjson.Null:
+						argsAny[i] = nil
+					}
+				}
+				result, err := database.Query(dbname, query, argsAny...)
+				if result == nil {
+					write(w, http.StatusNotFound, map[string]string{"error": "empty"})
+					return
+				}
+				response(w, result, err)
+				return
+			}
 			result, err := database.Query(dbname, query)
 			if result == nil {
 				write(w, http.StatusNotFound, map[string]string{"error": "empty"})
@@ -143,6 +166,24 @@ func command(w http.ResponseWriter, command string, dbname string, migration str
 			response(w, result, err)
 			return
 		case "exec":
+			if len(args) > 0 {
+				argsAny := make([]any, len(args))
+				for i, arg := range args {
+					switch arg.Type {
+					case gjson.String:
+						argsAny[i] = arg.String()
+					case gjson.Number:
+						argsAny[i] = arg.Num
+					case gjson.False, gjson.True:
+						argsAny[i] = arg.Bool()
+					case gjson.Null:
+						argsAny[i] = nil
+					}
+				}
+				result, err := database.Exec(dbname, query, argsAny...)
+				response(w, result, err)
+				return
+			}
 			result, err := database.Exec(dbname, query)
 			response(w, result, err)
 			return
@@ -179,14 +220,16 @@ func command(w http.ResponseWriter, command string, dbname string, migration str
 		}
 		response(w, status.GetMsg(), nil)
 	case "query":
-		result, err := client.Query(context.Background(), &pop.RequestQueryExec{Name: dbname, Query: query})
+		argsAny := iter(args...)
+		result, err := client.Query(context.Background(), &pop.RequestQueryExec{Name: dbname, Query: query, Args: argsAny})
 		if err != nil {
 			response(w, "error", err)
 			return
 		}
 		response(w, result.GetResult(), nil)
 	case "exec":
-		result, err := client.Exec(context.Background(), &pop.RequestQueryExec{Name: dbname, Query: query})
+		argsAny := iter(args...)
+		result, err := client.Exec(context.Background(), &pop.RequestQueryExec{Name: dbname, Query: query, Args: argsAny})
 		if err != nil {
 			response(w, "error", err)
 			return
@@ -195,9 +238,41 @@ func command(w http.ResponseWriter, command string, dbname string, migration str
 	}
 }
 
+func iter(args ...gjson.Result) []*anypb.Any {
+	argsAny := make([]*anypb.Any, len(args))
+	for i, arg := range args {
+		switch arg.Type {
+		case gjson.String:
+			argsStr := wrapperspb.StringValue{Value: arg.String()}
+			pbStr, _ := anypb.New(&argsStr)
+			argsAny[i] = pbStr
+		case gjson.Number:
+			argNum := wrapperspb.DoubleValue{Value: arg.Num}
+			pbNum, _ := anypb.New(&argNum)
+			argsAny[i] = pbNum
+		case gjson.False, gjson.True:
+			argBool := wrapperspb.Bool(arg.Bool())
+			pbBool, _ := anypb.New(argBool)
+			argsAny[i] = pbBool
+		case gjson.Null:
+			argsAny[i] = nil
+		}
+	}
+	return argsAny
+}
+
+func isNumeric(s string) bool {
+	_, err := strconv.ParseFloat(s, 64)
+	return err == nil
+}
+
 func response(w http.ResponseWriter, result any, err error) {
 	if err != nil {
 		write(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if b, ok := result.([]byte); ok {
+		write(w, http.StatusOK, map[string]any{"message": json.RawMessage(b)})
 		return
 	}
 	write(w, http.StatusOK, map[string]any{"message": result})

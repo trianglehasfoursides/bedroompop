@@ -68,7 +68,7 @@ func Get(databaseName string) error {
 
 // Query executes a SQL query on the specified SQLite database.
 // It supports both SELECT queries (returns rows as JSON) and non-SELECT queries (logs affected rows).
-func Query(databaseName string, query string) ([]byte, error) {
+func Query(databaseName string, query string, args ...any) ([]byte, error) {
 	if err := Get(databaseName); err != nil {
 		return nil, err
 	}
@@ -88,7 +88,7 @@ func Query(databaseName string, query string) ([]byte, error) {
 	defer txn.Rollback()
 
 	// Execute the query
-	rows, err := txn.QueryContext(ctx, query)
+	rows, err := txn.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +150,7 @@ func Query(databaseName string, query string) ([]byte, error) {
 
 // Exec executes a non-SELECT SQL query (e.g., INSERT, UPDATE, DELETE) on the specified SQLite database.
 // It returns the number of rows affected.
-func Exec(databaseName string, query string) (int64, error) {
+func Exec(databaseName string, query string, args ...any) (int64, error) {
 	if err := Get(databaseName); err != nil {
 		return 0, err
 	}
@@ -170,7 +170,7 @@ func Exec(databaseName string, query string) (int64, error) {
 	defer txn.Rollback()
 
 	// Execute the query
-	result, err := txn.ExecContext(ctx, query)
+	result, err := txn.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, err
 	}

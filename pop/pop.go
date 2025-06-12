@@ -4,11 +4,15 @@ import (
 	"context"
 	"net"
 	"os"
+	"strconv"
 
 	"github.com/trianglehasfoursides/bedroompop/database"
 	"github.com/trianglehasfoursides/bedroompop/flags"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 type server struct{}
@@ -35,14 +39,63 @@ func (s *server) Get(c context.Context, req *RequestGetDrop) (*DDLResponse, erro
 }
 
 func (s *server) Query(c context.Context, req *RequestQueryExec) (*ResponseQuery, error) {
+	if len(req.Args) > 0 {
+		reqAny := make([]any, len(req.Args))
+		for i, arg := range req.Args {
+			msg, err := anypb.UnmarshalNew(arg, proto.UnmarshalOptions{})
+			if err != nil {
+				return nil, err
+			}
+			switch v := msg.(type) {
+			case *wrapperspb.StringValue:
+				reqAny[i] = v.GetValue()
+			case *wrapperspb.DoubleValue:
+				reqAny[i] = v.Value
+			case *wrapperspb.BoolValue:
+				reqAny[i] = v.Value
+			default:
+				reqAny[i] = nil
+			}
+		}
+		result, err := database.Query(req.GetName(), req.GetQuery(), reqAny...)
+		if err != nil {
+			return nil, err
+		}
+		return &ResponseQuery{Result: result}, nil
+	}
+
 	result, err := database.Query(req.GetName(), req.GetQuery())
 	if err != nil {
 		return nil, err
 	}
-	return &ResponseQuery{Result: string(result)}, nil
+	return &ResponseQuery{Result: result}, nil
 }
 
 func (s *server) Exec(c context.Context, req *RequestQueryExec) (*ResponseExec, error) {
+	if len(req.Args) > 0 {
+		reqAny := make([]any, len(req.Args))
+		for i, arg := range req.Args {
+			msg, err := anypb.UnmarshalNew(arg, proto.UnmarshalOptions{})
+			if err != nil {
+				return nil, err
+			}
+			switch v := msg.(type) {
+			case *wrapperspb.StringValue:
+				reqAny[i] = v.GetValue()
+			case *wrapperspb.DoubleValue:
+				reqAny[i] = v.Value
+			case *wrapperspb.BoolValue:
+				reqAny[i] = v.Value
+			default:
+				reqAny[i] = nil
+			}
+		}
+		result, err := database.Exec(req.GetName(), req.GetQuery(), reqAny...)
+		if err != nil {
+			return nil, err
+		}
+		return &ResponseExec{Result: result}, nil
+	}
 	result, err := database.Exec(req.GetName(), req.GetQuery())
 	if err != nil {
 		return nil, err
@@ -71,4 +124,9 @@ func Start(ch chan os.Signal) {
 	if err := popServer.Serve(listener); err != nil {
 		zap.L().Sugar().Panic(err.Error())
 	}
+}
+
+func isNumeric(s string) bool {
+	_, err := strconv.ParseFloat(s, 64)
+	return err == nil
 }

@@ -8,8 +8,8 @@ import (
 	"os/signal"
 	"strings"
 
+	"github.com/trianglehasfoursides/bedroompop/bedroom"
 	"github.com/trianglehasfoursides/bedroompop/consist"
-	"github.com/trianglehasfoursides/bedroompop/dream"
 	"github.com/trianglehasfoursides/bedroompop/flags"
 	"github.com/trianglehasfoursides/bedroompop/pop"
 	"go.uber.org/zap"
@@ -48,7 +48,7 @@ func main() {
 	zap.L().Sugar().Infoln("starting bedroompop")
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch)
-	go dream.Start(ch)
+	go bedroom.Start(ch)
 	go pop.Start(ch)
 
 	<-ch
