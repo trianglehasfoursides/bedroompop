@@ -1,13 +1,12 @@
-package pop
+package server
 
 import (
 	"context"
 	"net"
 	"os"
-	"strconv"
 
+	"github.com/trianglehasfoursides/bedroompop/config"
 	"github.com/trianglehasfoursides/bedroompop/database"
-	"github.com/trianglehasfoursides/bedroompop/flags"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
@@ -105,8 +104,8 @@ func (s *server) Exec(c context.Context, req *RequestQueryExec) (*ResponseExec, 
 
 func (s *server) mustEmbedUnimplementedPopServiceServer() {}
 
-func Start(ch chan os.Signal) {
-	listener, err := net.Listen("tcp", flags.GRPCAddr)
+func GRPCStart(ch chan os.Signal) {
+	listener, err := net.Listen("tcp", config.GRPCAddr)
 	if err != nil {
 		zap.L().Sugar().Panic(err.Error())
 	}
@@ -124,9 +123,4 @@ func Start(ch chan os.Signal) {
 	if err := popServer.Serve(listener); err != nil {
 		zap.L().Sugar().Panic(err.Error())
 	}
-}
-
-func isNumeric(s string) bool {
-	_, err := strconv.ParseFloat(s, 64)
-	return err == nil
 }

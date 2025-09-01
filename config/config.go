@@ -1,6 +1,7 @@
-package flags
+package config
 
 var (
+	Name     string
 	Username string
 	Password string
 	HTTPAddr string

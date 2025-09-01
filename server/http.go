@@ -1,22 +1,21 @@
-package bedroom
+package server
 
 import (
+	"net/http"
+
 	"context"
 	"encoding/json"
 	"io"
-	"net/http"
 	"os"
 	"strconv"
-	"sync"
-	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/trianglehasfoursides/bedroompop/config"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 	"github.com/tidwall/gjson"
 	"github.com/trianglehasfoursides/bedroompop/consist"
 	"github.com/trianglehasfoursides/bedroompop/database"
-	"github.com/trianglehasfoursides/bedroompop/flags"
-	"github.com/trianglehasfoursides/bedroompop/pop"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -24,34 +23,33 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
-var dbMutex sync.Mutex
+func Auth(ctx *gin.Context) {
+	username, password, ok := ctx.Request.BasicAuth()
+	if !ok {
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+			"error": "can't authenticate",
+		})
+	}
+
+	isValid := (username == config.Username) && (password == config.Password)
+	if !isValid {
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+			"error": "not authorized",
+		})
+		return
+	}
+
+	ctx.Next()
+}
 
 func Start(ch chan os.Signal) {
 	// router
-	r := chi.NewRouter()
-
-	// middlewares
-	r.Use(MiddlewareAuth)
-	r.Use(middleware.RequestID)
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(60 * time.Second))
-
-	// routes
-	r.Route("/v1", func(r chi.Router) {
-		r.Route("/databases", func(r chi.Router) {
-			r.Post("/", Create)
-			r.Get("/{name}", Get)
-			r.Delete("/{name}", Drop)
-			r.Post("/query", Query)
-			r.Post("/exec", Exec)
-		})
-	})
+	router := gin.Default()
 
 	// HTTP server
 	server := &http.Server{
-		Addr:    flags.HTTPAddr,
-		Handler: r,
+		Addr:    config.HTTPAddr,
+		Handler: router,
 	}
 
 	go func() {
@@ -75,7 +73,6 @@ func Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	command(w, "create", name, migration, "")
-	return
 }
 
 // GetDatabase handles retrieving a specific database by name.
@@ -86,7 +83,6 @@ func Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	command(w, "get", name, "", "")
-	return
 }
 
 // DeleteDatabase handles deleting a specific database by name.
@@ -97,7 +93,6 @@ func Drop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	command(w, "drop", name, "", "")
-	return
 }
 
 func Query(w http.ResponseWriter, r *http.Request) {
@@ -108,7 +103,6 @@ func Query(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	command(w, "query", name, "", query, args...)
-	return
 }
 
 func Exec(w http.ResponseWriter, r *http.Request) {
@@ -119,12 +113,11 @@ func Exec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	command(w, "exec", name, "", query, args...)
-	return
 }
 
 func command(w http.ResponseWriter, command string, dbname string, migration string, query string, args ...gjson.Result) {
 	node := consist.Consist.LocateKey([]byte(dbname))
-	if node.String() == flags.GRPCAddr {
+	if node.String() == config.GRPCAddr {
 		switch command {
 		case "create":
 			response(w, "sucess", database.Create(dbname, migration))
@@ -195,10 +188,10 @@ func command(w http.ResponseWriter, command string, dbname string, migration str
 		return
 	}
 	defer conn.Close()
-	client := pop.NewPopServiceClient(conn)
+	client := NewPopServiceClient(conn)
 	switch command {
 	case "create":
-		status, err := client.Create(context.Background(), &pop.RequestCreate{Name: dbname, Migration: migration})
+		status, err := client.Create(context.Background(), &RequestCreate{Name: dbname, Migration: migration})
 		if err != nil {
 			response(w, "error", err)
 			return
@@ -206,14 +199,14 @@ func command(w http.ResponseWriter, command string, dbname string, migration str
 		response(w, status.GetMsg(), nil)
 		return
 	case "get":
-		status, err := client.Get(context.Background(), &pop.RequestGetDrop{Name: dbname})
+		status, err := client.Get(context.Background(), &RequestGetDrop{Name: dbname})
 		if err != nil {
 			response(w, "error", err)
 			return
 		}
 		response(w, status.GetMsg(), nil)
 	case "drop":
-		status, err := client.Drop(context.Background(), &pop.RequestGetDrop{Name: dbname})
+		status, err := client.Drop(context.Background(), &RequestGetDrop{Name: dbname})
 		if err != nil {
 			response(w, "error", err)
 			return
@@ -221,7 +214,7 @@ func command(w http.ResponseWriter, command string, dbname string, migration str
 		response(w, status.GetMsg(), nil)
 	case "query":
 		argsAny := iter(args...)
-		result, err := client.Query(context.Background(), &pop.RequestQueryExec{Name: dbname, Query: query, Args: argsAny})
+		result, err := client.Query(context.Background(), &RequestQueryExec{Name: dbname, Query: query, Args: argsAny})
 		if err != nil {
 			response(w, "error", err)
 			return
@@ -229,7 +222,7 @@ func command(w http.ResponseWriter, command string, dbname string, migration str
 		response(w, result.GetResult(), nil)
 	case "exec":
 		argsAny := iter(args...)
-		result, err := client.Exec(context.Background(), &pop.RequestQueryExec{Name: dbname, Query: query, Args: argsAny})
+		result, err := client.Exec(context.Background(), &RequestQueryExec{Name: dbname, Query: query, Args: argsAny})
 		if err != nil {
 			response(w, "error", err)
 			return
