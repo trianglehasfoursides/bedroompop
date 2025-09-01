@@ -16,7 +16,7 @@ func main() {
 	flag.StringVar(&config.Name, "name", "", "")
 	flag.StringVar(&config.HTTPAddr, "http-address", ":7000", "")
 	flag.StringVar(&config.GRPCAddr, "grpc-address", ":7070", "")
-	flag.StringVar(&config.GossipAddr, "gossip-address", ":7777", "")
+	flag.StringVar(&config.GossipAddr, "gossip-address", "localhost:7777", "")
 	flag.StringVar(&config.Join, "join", "", "")
 	flag.StringVar(&config.Username, "username", "soy", "")
 	flag.StringVar(&config.Password, "password", "pablo", "")
@@ -33,6 +33,7 @@ func main() {
 	}
 
 	log.Info("starting Bedroompop")
+
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch)
 	go server.Start(ch)

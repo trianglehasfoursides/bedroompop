@@ -52,6 +52,9 @@ func CreateGossip(grpc string, goss string, name string) (gossip *Gossip, err er
 	config.BindAddr = gss[0]
 	config.BindPort, _ = strconv.Atoi(gss[1])
 
+	config.AdvertiseAddr = config.BindAddr
+	config.AdvertisePort = config.BindPort
+
 	gossip = new(Gossip)
 	gossip.Node, err = memberlist.Create(config)
 	if err != nil {
