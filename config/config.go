@@ -1,10 +1,11 @@
 package config
 
 var (
-	Name     string
-	Username string
-	Password string
-	HTTPAddr string
-	GRPCAddr string
-	Join     string
+	Name       string
+	Username   string
+	Password   string
+	HTTPAddr   string
+	GRPCAddr   string
+	GossipAddr string
+	Join       string
 )

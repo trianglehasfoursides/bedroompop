@@ -1,6 +1,10 @@
 package server
 
 import (
+	"fmt"
+	"strconv"
+	"strings"
+
 	"github.com/hashicorp/memberlist"
 	"github.com/trianglehasfoursides/bedroompop/consist"
 )
@@ -36,12 +40,17 @@ type Gossip struct {
 	Node *memberlist.Memberlist
 }
 
-func CreateGossip(address string) (gossip *Gossip, err error) {
-	delegate := &MyDelegate{meta: []byte(address)}
+func CreateGossip(grpc string, goss string, name string) (gossip *Gossip, err error) {
+	delegate := &MyDelegate{meta: []byte(grpc)}
 
 	config := memberlist.DefaultLocalConfig()
+	config.Name = name
 	config.Delegate = delegate
 	config.Events = new(NotifyDelegate)
+
+	gss := strings.Split(goss, ":")
+	config.BindAddr = gss[0]
+	config.BindPort, _ = strconv.Atoi(gss[1])
 
 	gossip = new(Gossip)
 	gossip.Node, err = memberlist.Create(config)
@@ -53,12 +62,13 @@ func CreateGossip(address string) (gossip *Gossip, err error) {
 }
 
 // first time join
-func (g *Gossip) Join(nodes ...string) (err error) {
+func (g *Gossip) Join(nodes []string) (err error) {
 	if _, err = g.Node.Join(nodes); err != nil {
 		return
 	}
 
 	for _, n := range g.Node.Members() {
+		fmt.Println(n.Meta)
 		consist.Consist.Add(consist.Member(n.Meta))
 	}
 

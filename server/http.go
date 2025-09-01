@@ -4,23 +4,18 @@ import (
 	"net/http"
 
 	"context"
-	"encoding/json"
 	"io"
 	"os"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/trianglehasfoursides/bedroompop/config"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/tidwall/gjson"
 	"github.com/trianglehasfoursides/bedroompop/consist"
 	"github.com/trianglehasfoursides/bedroompop/database"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 func Auth(ctx *gin.Context) {
@@ -46,6 +41,8 @@ func Start(ch chan os.Signal) {
 	// router
 	router := gin.Default()
 
+	router.Use(Auth)
+
 	// HTTP server
 	server := &http.Server{
 		Addr:    config.HTTPAddr,
@@ -53,10 +50,8 @@ func Start(ch chan os.Signal) {
 	}
 
 	go func() {
-		select {
-		case _ = <-ch:
-			server.Shutdown(context.TODO())
-		}
+		<-ch
+		server.Shutdown(context.TODO())
 	}()
 
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -64,45 +59,184 @@ func Start(ch chan os.Signal) {
 	}
 }
 
-// CreateDatabase handles csreating a new database.
-func Create(w http.ResponseWriter, r *http.Request) {
-	body, _ := io.ReadAll(r.Body)
-	name, migration := gjson.Get(string(body), "name").String(), gjson.Get(string(body), "migration").String()
-	if name == "" {
-		http.Error(w, "database name is required", 400)
+func create(ctx *gin.Context) {
+	req := struct {
+		Name      string `json:"name"`
+		Migration string `json:"migration"`
+	}{}
+
+	if err := ctx.BindJSON(req); err != nil {
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+	}
+
+	if req.Name == "" {
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+			"error": "name can't be empty",
+		})
+	}
+
+	address := consist.Consist.LocateKey([]byte(req.Name)).String()
+	if address == config.GRPCAddr {
+		if err := database.Create(req.Name, req.Migration); err != nil {
+			ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				"error": err.Error(),
+			})
+		}
+	}
+
+	conn, err := grpc.NewClient(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
 		return
 	}
-	command(w, "create", name, migration, "")
+	defer conn.Close()
+	client := NewPopServiceClient(conn)
+
+	if _, err := client.Create(ctx, &RequestCreate{
+		Name:      req.Name,
+		Migration: req.Migration,
+	}); err != nil {
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
+	}
 }
 
-// GetDatabase handles retrieving a specific database by name.
-func Get(w http.ResponseWriter, r *http.Request) {
-	name := chi.URLParam(r, "name")
+func get(ctx *gin.Context) {
+	name := ctx.Param("name")
 	if name == "" {
-		http.Error(w, "database name is required", 400)
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+			"error": "name can't be empty",
+		})
 		return
 	}
-	command(w, "get", name, "", "")
+
+	address := consist.Consist.LocateKey([]byte(name)).String()
+	if address == config.GRPCAddr {
+		if err := database.Get(name); err != nil {
+			ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+				"error": err.Error(),
+			})
+			return
+		}
+	}
+
+	conn, err := grpc.NewClient(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+	defer conn.Close()
+	client := NewPopServiceClient(conn)
+
+	if _, err := client.Get(ctx, &RequestGetDrop{
+		Name: name,
+	}); err != nil {
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+	}
 }
 
-// DeleteDatabase handles deleting a specific database by name.
-func Drop(w http.ResponseWriter, r *http.Request) {
-	name := chi.URLParam(r, "name")
+func drop(ctx *gin.Context) {
+	name := ctx.Param("name")
 	if name == "" {
-		http.Error(w, "database name is required", 400)
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+			"error": "name can't be empty",
+		})
 		return
 	}
-	command(w, "drop", name, "", "")
+
+	address := consist.Consist.LocateKey([]byte(name)).String()
+	if address == config.GRPCAddr {
+		if err := database.Drop(name); err != nil {
+			ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+				"error": err.Error(),
+			})
+			return
+		}
+	}
+
+	conn, err := grpc.NewClient(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+	defer conn.Close()
+	client := NewPopServiceClient(conn)
+
+	if _, err := client.Drop(ctx, &RequestGetDrop{
+		Name: name,
+	}); err != nil {
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+	}
 }
 
-func Query(w http.ResponseWriter, r *http.Request) {
-	body, _ := io.ReadAll(r.Body)
-	name, query, args := gjson.Get(string(body), "name").String(), gjson.Get(string(body), "query").String(), gjson.Get(string(body), "args").Array()
-	if name == "" && query == "" {
-		http.Error(w, "database name is required", 400)
+func Query(ctx *gin.Context) {
+	req := struct {
+		Name  string `json:"name"`
+		Query string `json:"query"`
+	}{}
+
+	if err := ctx.BindJSON(req); err != nil {
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
 		return
 	}
-	command(w, "query", name, "", query, args...)
+
+	if req.Name == "" {
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+			"error": "name can't be empty",
+		})
+		return
+	}
+
+	if req.Query == "" {
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+			"error": "query can't be empty",
+		})
+		return
+	}
+
+	address := consist.Consist.LocateKey([]byte(req.Name)).String()
+	if address == config.GRPCAddr {
+		if _, err := database.Query(req.Name, req.Query); err != nil {
+			ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+				"error": err.Error(),
+			})
+			return
+		}
+	}
+
+	conn, err := grpc.NewClient(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+	defer conn.Close()
+	client := NewPopServiceClient(conn)
+
+	if _, err := client.Query(ctx, &RequestQueryExec{
+		Name:  req.Name,
+		Query: req.Query,
+	}); err != nil {
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
+	}
 }
 
 func Exec(w http.ResponseWriter, r *http.Request) {
@@ -113,167 +247,4 @@ func Exec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	command(w, "exec", name, "", query, args...)
-}
-
-func command(w http.ResponseWriter, command string, dbname string, migration string, query string, args ...gjson.Result) {
-	node := consist.Consist.LocateKey([]byte(dbname))
-	if node.String() == config.GRPCAddr {
-		switch command {
-		case "create":
-			response(w, "sucess", database.Create(dbname, migration))
-			return
-		case "get":
-			response(w, "sucess", database.Get(dbname))
-			return
-		case "drop":
-			response(w, "sucess", database.Drop(dbname))
-			return
-		case "query":
-			if len(args) > 0 {
-				argsAny := make([]any, len(args))
-				for i, arg := range args {
-					switch arg.Type {
-					case gjson.String:
-						argsAny[i] = arg.String()
-					case gjson.Number:
-						argsAny[i] = arg.Num
-					case gjson.False, gjson.True:
-						argsAny[i] = arg.Bool()
-					case gjson.Null:
-						argsAny[i] = nil
-					}
-				}
-				result, err := database.Query(dbname, query, argsAny...)
-				if result == nil {
-					write(w, http.StatusNotFound, map[string]string{"error": "empty"})
-					return
-				}
-				response(w, result, err)
-				return
-			}
-			result, err := database.Query(dbname, query)
-			if result == nil {
-				write(w, http.StatusNotFound, map[string]string{"error": "empty"})
-				return
-			}
-			response(w, result, err)
-			return
-		case "exec":
-			if len(args) > 0 {
-				argsAny := make([]any, len(args))
-				for i, arg := range args {
-					switch arg.Type {
-					case gjson.String:
-						argsAny[i] = arg.String()
-					case gjson.Number:
-						argsAny[i] = arg.Num
-					case gjson.False, gjson.True:
-						argsAny[i] = arg.Bool()
-					case gjson.Null:
-						argsAny[i] = nil
-					}
-				}
-				result, err := database.Exec(dbname, query, argsAny...)
-				response(w, result, err)
-				return
-			}
-			result, err := database.Exec(dbname, query)
-			response(w, result, err)
-			return
-		}
-	}
-	conn, err := grpc.NewClient(node.String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		response(w, "error", err)
-		return
-	}
-	defer conn.Close()
-	client := NewPopServiceClient(conn)
-	switch command {
-	case "create":
-		status, err := client.Create(context.Background(), &RequestCreate{Name: dbname, Migration: migration})
-		if err != nil {
-			response(w, "error", err)
-			return
-		}
-		response(w, status.GetMsg(), nil)
-		return
-	case "get":
-		status, err := client.Get(context.Background(), &RequestGetDrop{Name: dbname})
-		if err != nil {
-			response(w, "error", err)
-			return
-		}
-		response(w, status.GetMsg(), nil)
-	case "drop":
-		status, err := client.Drop(context.Background(), &RequestGetDrop{Name: dbname})
-		if err != nil {
-			response(w, "error", err)
-			return
-		}
-		response(w, status.GetMsg(), nil)
-	case "query":
-		argsAny := iter(args...)
-		result, err := client.Query(context.Background(), &RequestQueryExec{Name: dbname, Query: query, Args: argsAny})
-		if err != nil {
-			response(w, "error", err)
-			return
-		}
-		response(w, result.GetResult(), nil)
-	case "exec":
-		argsAny := iter(args...)
-		result, err := client.Exec(context.Background(), &RequestQueryExec{Name: dbname, Query: query, Args: argsAny})
-		if err != nil {
-			response(w, "error", err)
-			return
-		}
-		response(w, result.GetResult(), nil)
-	}
-}
-
-func iter(args ...gjson.Result) []*anypb.Any {
-	argsAny := make([]*anypb.Any, len(args))
-	for i, arg := range args {
-		switch arg.Type {
-		case gjson.String:
-			argsStr := wrapperspb.StringValue{Value: arg.String()}
-			pbStr, _ := anypb.New(&argsStr)
-			argsAny[i] = pbStr
-		case gjson.Number:
-			argNum := wrapperspb.DoubleValue{Value: arg.Num}
-			pbNum, _ := anypb.New(&argNum)
-			argsAny[i] = pbNum
-		case gjson.False, gjson.True:
-			argBool := wrapperspb.Bool(arg.Bool())
-			pbBool, _ := anypb.New(argBool)
-			argsAny[i] = pbBool
-		case gjson.Null:
-			argsAny[i] = nil
-		}
-	}
-	return argsAny
-}
-
-func isNumeric(s string) bool {
-	_, err := strconv.ParseFloat(s, 64)
-	return err == nil
-}
-
-func response(w http.ResponseWriter, result any, err error) {
-	if err != nil {
-		write(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	if b, ok := result.([]byte); ok {
-		write(w, http.StatusOK, map[string]any{"message": json.RawMessage(b)})
-		return
-	}
-	write(w, http.StatusOK, map[string]any{"message": result})
-}
-
-// write is a helper function to write JSON responses.
-func write(w http.ResponseWriter, status int, data any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
 }
